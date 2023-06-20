@@ -11,6 +11,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/photo.hpp>
 #include <px4_msgs/msg/vehicle_gps_position.hpp>
+#include <stdint.h>
 
 using std::placeholders::_1;
 
@@ -24,6 +25,9 @@ public:
   m_irImagePtr(nullptr),
   m_waypoints({})
   {
+    declare_parameter("wp_lat");
+    declare_parameter("wp_lon");
+
     m_RGBSubscriber = create_subscription<sensor_msgs::msg::Image>
     ("/camera/color/image_raw", 10, std::bind(&CameraScreenshotsHandler::rgb_callback, this, _1));
 
@@ -32,11 +36,30 @@ public:
 
     m_GPSSubscriber = create_subscription<px4_msgs::msg::VehicleGpsPosition>
     ("/fmu/vehicle_gps_position/out", 10, std::bind(&CameraScreenshotsHandler::gps_callback, this, _1));
+
+    init();
+
   }
 
   ~CameraScreenshotsHandler() = default;
 
 private:
+
+  inline void init()
+  {
+    const std::vector<int64_t> wp_latitude = get_parameter("wp_lat").as_integer_array();
+    const std::vector<int64_t> wp_longitude = get_parameter("wp_lon").as_integer_array();
+
+    for(std::size_t i = 0; i < wp_latitude.size(); ++i)
+    {
+      m_waypoints.push_back(std::make_pair(wp_latitude[i], wp_longitude[i]));
+    }
+
+    m_numWaypoints = m_waypoints.size();
+
+    RCLCPP_INFO(get_logger(), "NUM WAYPOINTS: %d", m_numWaypoints);
+
+  }
 
   inline void ir_callback(const sensor_msgs::msg::Image::SharedPtr msg)
   {
@@ -76,7 +99,7 @@ private:
 
   bool m_takeScreenshot;
 
-  std::list<std::pair<int32_t, int32_t>> m_waypoints;
+  std::vector<std::pair<int64_t, int64_t>> m_waypoints;
 
   int32_t m_numWaypoints;
 
