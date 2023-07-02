@@ -25,8 +25,9 @@ const std::string CSV_IR_COL_STR = "ir_img_name";
 const std::string CSV_LAT_COL_STR = "latitude";
 const std::string CSV_LON_COL_STR = "longitude";
 const std::string CSV_YAW_COL_STR = "yaw";
-const std::string RGB_IMG_STR = "rgb_img_";
-const std::string IR_IMG_STR = "ir_img_";
+const std::string RGB_IMG_STR = "rgb_img_wp_";
+const std::string IR_IMG_STR = "ir_img_wp_";
+const std::string PNG_EXTENSION = ".png";
 const std::list<std::string> CSV_COL_NAMES = {CSV_RGB_COL_STR, CSV_IR_COL_STR, CSV_LAT_COL_STR, CSV_LON_COL_STR, CSV_YAW_COL_STR};
 constexpr int32_t ROLL = 0;
 constexpr int32_t PITCH = 1;
@@ -47,7 +48,9 @@ void CameraScreenshotsHandler::write_CSV_file(const std::list<std::string> &fiel
 {
   const std::string row = boost::algorithm::join(fields, COMMA_STR);
 
-  std::ofstream csvFile(m_csvFilePath);
+  std::fstream csvFile(m_csvFilePath, std::ios::in | std::ios::out);
+
+  csvFile.seekp(0, std::ios::end);
 
   csvFile << row << std::endl;
 }
@@ -101,9 +104,10 @@ void CameraScreenshotsHandler::create_mission_dir()
 
       if(true == dirCreated)
       {
-        std::filesystem::permissions(m_missionDir, std::filesystem::perms::owner_all | std::filesystem::perms::group_read | 
-                                                   std::filesystem::perms::group_write | std::filesystem::perms::others_read);
-        // std::cout << "MISSION DIR '" << m_missionDir.generic_string() << "' CREATED" << std::endl;
+        std::filesystem::permissions(m_missionDir, 
+                                      std::filesystem::perms::owner_all | std::filesystem::perms::group_read | 
+                                      std::filesystem::perms::group_write | std::filesystem::perms::others_read);
+
         RCLCPP_INFO(get_logger(), "MISSION DIR '%s' CREATED", m_missionDir.string().c_str());
       }
       else
@@ -142,7 +146,6 @@ void CameraScreenshotsHandler::init()
 
   //  Create CSV file for metadata
   create_mission_CSV();
-
 }
 
 
@@ -181,16 +184,19 @@ void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q, c
   float correctedQ[4] = {q[0] - qOffset[0], q[1] - qOffset[1], q[2] - qOffset[2], q[3] - qOffset[3]};
 
   // Normalize values
-  const float norm = std::sqrt(correctedQ[0]*correctedQ[0] + correctedQ[1]*correctedQ[1] + correctedQ[2]*correctedQ[2] + correctedQ[3]*correctedQ[3]);
+  const float norm = std::sqrt(correctedQ[0]*correctedQ[0] + correctedQ[1]*correctedQ[1] + 
+                               correctedQ[2]*correctedQ[2] + correctedQ[3]*correctedQ[3]);
   correctedQ[0] /= norm;
   correctedQ[1] /= norm;
   correctedQ[2] /= norm;
   correctedQ[3] /= norm;
 
   // Conversion to roll, pitch, yaw
-  m_odom[0] = std::atan2(2 * (correctedQ[3] * correctedQ[0] + correctedQ[1] * correctedQ[2]), 1 - 2 * (correctedQ[0] * correctedQ[0] + correctedQ[1] * correctedQ[1]));
+  m_odom[0] = std::atan2(2 * (correctedQ[3] * correctedQ[0] + correctedQ[1] * correctedQ[2]), 
+                         1 - 2 * (correctedQ[0] * correctedQ[0] + correctedQ[1] * correctedQ[1]));
   m_odom[1] = std::asin(2 * (correctedQ[3] * correctedQ[1] - correctedQ[2] * correctedQ[0]));
-  m_odom[2] = std::atan2(2 * (correctedQ[3] * correctedQ[2] + correctedQ[0] * correctedQ[1]), 1 - 2 * (correctedQ[1] * correctedQ[1] + correctedQ[2] * correctedQ[2]));
+  m_odom[2] = std::atan2(2 * (correctedQ[3] * correctedQ[2] + correctedQ[0] * correctedQ[1]), 
+                         1 - 2 * (correctedQ[1] * correctedQ[1] + correctedQ[2] * correctedQ[2]));
 }
 
 
@@ -209,13 +215,17 @@ void CameraScreenshotsHandler::storeWaypointData(const int32_t &lat, const int32
   const cv::Mat rgbImage = m_rgbImagePtr->image;
   const cv::Mat irImage = m_irImagePtr->image;
 
-  const std::string rgbImageStr = m_missionDir.string() + SLASH_STR + RGB_IMG_STR + std::to_string(m_waypointsVisited);
-  const std::string irImageStr = m_missionDir.string() + SLASH_STR + IR_IMG_STR + std::to_string(m_waypointsVisited);
+  const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
+  const std::string irImageFileName = IR_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
 
-  cv::imwrite(rgbImageStr, rgbImage);
-  cv::imwrite(irImageStr, irImage);
+  const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
+  const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
 
-  const std::list<std::string> fields = {rgbImageStr, irImageStr, std::to_string(lat), std::to_string(lon), std::to_string(yaw)};
+  cv::imwrite(rgbImagePath, rgbImage);
+  cv::imwrite(irImagePath, irImage);
+
+  const std::list<std::string> fields = {rgbImageFileName, irImageFileName, std::to_string(lat), 
+                                          std::to_string(lon), std::to_string(yaw)};
 
   write_CSV_file(fields);
   }
@@ -233,7 +243,8 @@ void CameraScreenshotsHandler::gps_callback(const px4_msgs::msg::VehicleGpsPosit
     (msg->lat - m_waypoints[m_waypointsVisited].first), (msg->lon - m_waypoints[m_waypointsVisited].second));
 
     // If it is inside the waypoint area
-    if(((msg->lat - m_waypoints[m_waypointsVisited].first) < ERROR) && ((msg->lon - m_waypoints[m_waypointsVisited].second) < ERROR))
+    if(((msg->lat - m_waypoints[m_waypointsVisited].first) < ERROR) && 
+       ((msg->lon - m_waypoints[m_waypointsVisited].second) < ERROR))
     {
       RCLCPP_INFO(get_logger(), "WAYPOINT DETECTED!!! CHECKING ROLL/PITCH");
       RCLCPP_INFO(get_logger(), "ROLL: %s | PITCH: %s", fabs(m_odom[ROLL]), fabs(m_odom[PITCH]));
