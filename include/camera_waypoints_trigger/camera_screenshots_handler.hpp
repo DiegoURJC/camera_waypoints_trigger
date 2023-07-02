@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <filesystem>
+#include <fstream>
 
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
@@ -50,6 +51,8 @@ public:
 
 private:
 
+  void write_CSV_file(const std::list<std::string> &fields);
+
   void create_mission_CSV();
 
   void create_mission_dir();
@@ -63,6 +66,8 @@ private:
   void quaternion2euler(const std::array<float, 4> &q, const std::array<float, 4> &q_offset); 
 
   void odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg);
+
+  void storeWaypointData(const int32_t &lat, const int32_t &lon, const float &yaw);
 
   void gps_callback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr msg);
 
@@ -79,6 +84,7 @@ private:
   std::array<float, 3> m_odom;
 
   std::filesystem::path m_missionDir;
+  std::string m_csvFilePath;
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_RGBSubscriber;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_IRSubscriber;
