@@ -32,10 +32,10 @@ public:
     declare_parameter("wp_lon");
 
     m_RGBSubscriber = create_subscription<sensor_msgs::msg::Image>
-    ("/camera/color/image_raw", 30, std::bind(&CameraScreenshotsHandler::rgb_callback, this, _1));
+    ("/camera/color/image_raw", 50, std::bind(&CameraScreenshotsHandler::rgb_callback, this, _1));
 
     m_IRSubscriber = create_subscription<sensor_msgs::msg::Image>
-    ("/camera/infra1/image_rect_raw", 30, std::bind(&CameraScreenshotsHandler::ir_callback, this, _1));
+    ("/camera/infra1/image_rect_raw", 50, std::bind(&CameraScreenshotsHandler::ir_callback, this, _1));
 
     m_GPSSubscriber = create_subscription<px4_msgs::msg::VehicleGpsPosition>
     ("/fmu/vehicle_gps_position/out", 100, std::bind(&CameraScreenshotsHandler::gps_callback, this, _1));
@@ -63,11 +63,11 @@ private:
 
   void rgb_callback(const sensor_msgs::msg::Image::SharedPtr msg);
 
-  void quaternion2euler(const std::array<float, 4> &q, const std::array<float, 4> &q_offset); 
+  void quaternion2euler(const std::array<float, 4> &q); 
 
   void odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg);
 
-  void storeWaypointData(const int32_t &lat, const int32_t &lon, const float &yaw);
+  bool storeWaypointData(const int32_t &lat, const int32_t &lon, const float &yaw);
 
   void gps_callback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr msg);
 
@@ -81,7 +81,7 @@ private:
 
   int32_t m_waypointsVisited;
 
-  std::array<float, 3> m_odom;
+  std::array<double, 3> m_odom;
 
   std::filesystem::path m_missionDir;
   std::string m_csvFilePath;

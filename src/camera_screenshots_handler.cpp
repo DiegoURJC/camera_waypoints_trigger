@@ -8,9 +8,6 @@
 
 #include "camera_waypoints_trigger/camera_screenshots_handler.hpp"
 #include <opencv2/highgui.hpp>
-#include "opencv2/xfeatures2d.hpp"
-#include "opencv2/features2d.hpp"
-#include <opencv2/calib3d.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/photo.hpp>
 
@@ -32,7 +29,7 @@ const std::list<std::string> CSV_COL_NAMES = {CSV_RGB_COL_STR, CSV_IR_COL_STR, C
 constexpr int32_t ROLL = 0;
 constexpr int32_t PITCH = 1;
 constexpr int32_t YAW = 2; 
-constexpr float TOLERANCE = 1.0e-3;
+constexpr float TOLERANCE = 0.035;
 
 
 void signalHandler(int signal)
@@ -178,57 +175,63 @@ void CameraScreenshotsHandler::rgb_callback(const sensor_msgs::msg::Image::Share
 }
 
 
-void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q, const std::array<float, 4> &qOffset) 
+void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q) 
 {
-  // Apply offset adjustment
-  float correctedQ[4] = {q[0] - qOffset[0], q[1] - qOffset[1], q[2] - qOffset[2], q[3] - qOffset[3]};
-
-  // Normalize values
-  const float norm = std::sqrt(correctedQ[0]*correctedQ[0] + correctedQ[1]*correctedQ[1] + 
-                               correctedQ[2]*correctedQ[2] + correctedQ[3]*correctedQ[3]);
-  correctedQ[0] /= norm;
-  correctedQ[1] /= norm;
-  correctedQ[2] /= norm;
-  correctedQ[3] /= norm;
+  constexpr int32_t W = 0;
+  constexpr int32_t X = 1;
+  constexpr int32_t Y = 2;
+  constexpr int32_t Z = 3;
 
   // Conversion to roll, pitch, yaw
-  m_odom[0] = std::atan2(2 * (correctedQ[3] * correctedQ[0] + correctedQ[1] * correctedQ[2]), 
-                         1 - 2 * (correctedQ[0] * correctedQ[0] + correctedQ[1] * correctedQ[1]));
-  m_odom[1] = std::asin(2 * (correctedQ[3] * correctedQ[1] - correctedQ[2] * correctedQ[0]));
-  m_odom[2] = std::atan2(2 * (correctedQ[3] * correctedQ[2] + correctedQ[0] * correctedQ[1]), 
-                         1 - 2 * (correctedQ[1] * correctedQ[1] + correctedQ[2] * correctedQ[2]));
+  m_odom[ROLL] = std::atan2(2 * (q[W] * q[X] + q[Y] * q[Z]), 
+                         1 - 2 * (q[X] * q[X] + q[Y] * q[Y]));
+  m_odom[PITCH] = std::asin(2 * (q[W] * q[Y] - q[Z] * q[X]));
+  m_odom[YAW] = std::atan2(2 * (q[W] * q[Z] + q[X] * q[Y]), 
+                         1 - 2 * (q[Y] * q[Y] + q[Z] * q[Z]));
+
+  RCLCPP_INFO(get_logger(), "ROLL: %f(deg) | PITCH: %f(deg) | YAW: %f(deg)", (m_odom[0]*180.0)/ 3.1415, (m_odom[1]*180.0)/ 3.1415, (m_odom[2]*180.0)/ 3.1415);
 }
 
 
 void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg)
 {
   const std::array<float, 4> q = msg->q;
-  const std::array<float, 4> qOffset = msg->q_offset;
 
-
-  quaternion2euler(q, qOffset);
+  quaternion2euler(q);
 
 }
 
-void CameraScreenshotsHandler::storeWaypointData(const int32_t &lat, const int32_t &lon, const float &yaw)
+bool CameraScreenshotsHandler::storeWaypointData(const int32_t &lat, const int32_t &lon, const float &yaw)
 {
   const cv::Mat rgbImage = m_rgbImagePtr->image;
   const cv::Mat irImage = m_irImagePtr->image;
+  bool retStatus = true;
 
-  const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
-  const std::string irImageFileName = IR_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
+  if((false == rgbImage.empty()) && (false == irImage.empty()))
+  {
+    const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
+    const std::string irImageFileName = IR_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
 
-  const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
-  const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
+    const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
+    const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
 
-  cv::imwrite(rgbImagePath, rgbImage);
-  cv::imwrite(irImagePath, irImage);
+    cv::imwrite(rgbImagePath, rgbImage);
+    cv::imwrite(irImagePath, irImage);
 
-  const std::list<std::string> fields = {rgbImageFileName, irImageFileName, std::to_string(lat), 
-                                          std::to_string(lon), std::to_string(yaw)};
+    const std::list<std::string> fields = {rgbImageFileName, irImageFileName, std::to_string(lat), 
+                                            std::to_string(lon), std::to_string(yaw)};
 
-  write_CSV_file(fields);
+    write_CSV_file(fields);
   }
+  else
+  {
+    RCLCPP_WARN(get_logger(), "COULD NOT GET RGB OR IR IMAGES, TRYING AGAIN...");
+    retStatus = false;
+  }
+
+
+  return retStatus;
+}
 
 
 void CameraScreenshotsHandler::gps_callback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr msg)
@@ -254,9 +257,12 @@ void CameraScreenshotsHandler::gps_callback(const px4_msgs::msg::VehicleGpsPosit
       {
         RCLCPP_INFO(get_logger(), "WAYPOINT READY!, CAPTURING IMAGES...");
 
-        storeWaypointData(msg->lat, msg->lon, m_odom[YAW]);
+        const bool status = storeWaypointData(msg->lat, msg->lon, m_odom[YAW]);
 
-        m_waypointsVisited++;
+        if(true == status)
+        {
+          m_waypointsVisited++;
+        }
       }
     }
   }
