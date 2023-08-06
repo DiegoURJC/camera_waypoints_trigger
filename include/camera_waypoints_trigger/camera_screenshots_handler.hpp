@@ -26,8 +26,11 @@ public:
   m_waypoints({}),
   m_numWaypoints(0),
   m_waypointsVisited(0),
-  m_odom({})
+  m_odom({}),
+  m_altitude(0.0)
   {
+    declare_parameter("mission_altitude");
+    declare_parameter("home_gps_pos");
     declare_parameter("wp_lat");
     declare_parameter("wp_lon");
 
@@ -36,9 +39,6 @@ public:
 
     m_IRSubscriber = create_subscription<sensor_msgs::msg::Image>
     ("/camera/infra1/image_rect_raw", 50, std::bind(&CameraScreenshotsHandler::ir_callback, this, _1));
-
-    m_GPSSubscriber = create_subscription<px4_msgs::msg::VehicleGpsPosition>
-    ("/fmu/vehicle_gps_position/out", 100, std::bind(&CameraScreenshotsHandler::gps_callback, this, _1));
 
     m_odometrySubscriber = create_subscription<px4_msgs::msg::VehicleOdometry>
     ("/fmu/vehicle_odometry/out", 100, std::bind(&CameraScreenshotsHandler::odom_callback, this, _1));
@@ -59,6 +59,8 @@ private:
 
   void init();
 
+  void initWaypoints();
+
   void ir_callback(const sensor_msgs::msg::Image::SharedPtr msg);
 
   void rgb_callback(const sensor_msgs::msg::Image::SharedPtr msg);
@@ -67,15 +69,12 @@ private:
 
   void odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg);
 
-  bool storeWaypointData(const int32_t &lat, const int32_t &lon, const float &yaw);
-
-  void gps_callback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr msg);
+  bool storeWaypointData(const std::array<double,3> &position, const std::array<double,3> odom);
 
   cv_bridge::CvImagePtr m_rgbImagePtr;
   cv_bridge::CvImagePtr m_irImagePtr;
 
-
-  std::vector<std::pair<int64_t, int64_t>> m_waypoints;
+  std::vector<std::pair<double, double>> m_waypoints;
 
   int32_t m_numWaypoints;
 
@@ -83,12 +82,15 @@ private:
 
   std::array<double, 3> m_odom;
 
+  double m_altitude;
+
   std::filesystem::path m_missionDir;
   std::string m_csvFilePath;
 
+  std::array<double,3> m_homePosNED;
+
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_RGBSubscriber;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_IRSubscriber;
-  rclcpp::Subscription<px4_msgs::msg::VehicleGpsPosition>::SharedPtr m_GPSSubscriber;
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr m_odometrySubscriber;
 
   const int32_t ERROR = 100;

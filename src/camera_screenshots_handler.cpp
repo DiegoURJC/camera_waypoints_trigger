@@ -7,6 +7,7 @@
 #include <boost/algorithm/string/join.hpp>
 
 #include "camera_waypoints_trigger/camera_screenshots_handler.hpp"
+#include "camera_waypoints_trigger/WGS84toCartesian.hpp"
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/photo.hpp>
@@ -15,20 +16,33 @@ const std::string MISSION_DIR_TOKEN = "mission_";
 const std::string SLASH_STR = "/";
 const std::string COMMA_STR = ",";
 const std::string CSV_FILENAME = "metadata.csv";
+const std::string HOME_ALT_PARAM = "mission_altitude";
+const std::string HOME_GPS_POS = "home_gps_pos";
 const std::string LAT_PARAM = "wp_lat";
 const std::string LON_PARAM = "wp_lon";
+const std::string CSV_NUM_WP_COL_STR = "num_waypoint";
 const std::string CSV_RGB_COL_STR = "rgb_img_name";
 const std::string CSV_IR_COL_STR = "ir_img_name";
-const std::string CSV_LAT_COL_STR = "latitude";
-const std::string CSV_LON_COL_STR = "longitude";
+const std::string CSV_X_COL_STR = "x";
+const std::string CSV_Y_COL_STR = "y";
+const std::string CSV_Z_COL_STR = "z";
+const std::string CSV_ROLL_COL_STR = "roll";
+const std::string CSV_PITCH_COL_STR = "pitch";
 const std::string CSV_YAW_COL_STR = "yaw";
 const std::string RGB_IMG_STR = "rgb_img_wp_";
 const std::string IR_IMG_STR = "ir_img_wp_";
 const std::string PNG_EXTENSION = ".png";
-const std::list<std::string> CSV_COL_NAMES = {CSV_RGB_COL_STR, CSV_IR_COL_STR, CSV_LAT_COL_STR, CSV_LON_COL_STR, CSV_YAW_COL_STR};
+const std::list<std::string> CSV_COL_NAMES = 
+  {CSV_NUM_WP_COL_STR, CSV_RGB_COL_STR, CSV_IR_COL_STR, 
+   CSV_X_COL_STR, CSV_Y_COL_STR, CSV_Z_COL_STR,
+   CSV_ROLL_COL_STR, CSV_PITCH_COL_STR, CSV_YAW_COL_STR};
 constexpr int32_t ROLL = 0;
 constexpr int32_t PITCH = 1;
 constexpr int32_t YAW = 2; 
+constexpr int32_t X = 0;
+constexpr int32_t Y = 1;
+constexpr int32_t Z = 2;
+
 constexpr float TOLERANCE = 0.035;
 
 
@@ -122,34 +136,60 @@ void CameraScreenshotsHandler::create_mission_dir()
 
 }
 
-
 void CameraScreenshotsHandler::init()
 {
+  //  Create directory where everything is going to be saved
+  create_mission_dir();
+
+  //  Create CSV file for metadata
+  create_mission_CSV();
+
+  initWaypoints();
+}
+
+
+void CameraScreenshotsHandler::initWaypoints()
+{
   // Store latitude/longitude from ros2 params
-  const std::vector<int64_t> wpLatitude = get_parameter(LAT_PARAM).as_integer_array();
-  const std::vector<int64_t> wpLongitude = get_parameter(LON_PARAM).as_integer_array();
+  m_altitude = get_parameter(HOME_ALT_PARAM).as_double();
+  const std::vector<double> homeVector = get_parameter(HOME_GPS_POS).as_double_array();
+  const std::vector<double> wpLatitude = get_parameter(LAT_PARAM).as_double_array();
+  const std::vector<double> wpLongitude = get_parameter(LON_PARAM).as_double_array();
+
+  const std::array<double,2> homePos = {homeVector[X], homeVector[Y]};
 
   for(std::size_t i = 0; i < wpLatitude.size(); ++i)
   {
-    m_waypoints.push_back(std::make_pair(wpLatitude[i], wpLongitude[i]));
+    const std::array<double,2> waypoint = {wpLatitude[i], wpLongitude[i]};
+
+    const std::array<double,2> cartesianWp = wgs84::toCartesian(homePos, waypoint);
+
+    m_waypoints.push_back(std::make_pair(cartesianWp[X], cartesianWp[Y]));
+
+    std::cout << std::setprecision(12);
+
+    std::cout << "REFERENCE POINT: (" << homePos[X] << "," << homePos[Y] << 
+      ") WAYPOINT: GPS(" << waypoint[X] << "," << waypoint[Y] << 
+      ") CART(" << cartesianWp[X] << "," << cartesianWp[Y] << std::endl;
+
+    printf("HOME GPS: (%f,%f) WAYPOINT GPS: (%f,%f) METERS(%f,%f)\n", 
+    homePos[X], homePos[Y], waypoint[X], waypoint[Y], cartesianWp[X], cartesianWp[Y]);
+
   }
 
   m_numWaypoints = m_waypoints.size();
 
   RCLCPP_INFO(get_logger(), "NUM WAYPOINTS: %d", m_numWaypoints);
 
-  //  Create directory where everything is going to be saved
-  create_mission_dir();
-
-  //  Create CSV file for metadata
-  create_mission_CSV();
+  for(auto const &wp: m_waypoints)
+  {
+    std::cout << wp.first << " " << wp.second << std::endl;
+  }
 }
 
 
 void CameraScreenshotsHandler::ir_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
-  RCLCPP_INFO(get_logger(), "IR CALLBACK");
-
   try
   {
     m_irImagePtr = cv_bridge::toCvCopy(msg, msg->encoding);
@@ -163,7 +203,6 @@ void CameraScreenshotsHandler::ir_callback(const sensor_msgs::msg::Image::Shared
 
 void CameraScreenshotsHandler::rgb_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
-  RCLCPP_INFO(get_logger(), "RGB CALLBACK");
   try
   {
     m_rgbImagePtr = cv_bridge::toCvCopy(msg, msg->encoding);
@@ -195,59 +234,20 @@ void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q)
 
 void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg)
 {
+  const std::array<double, 3> position = {msg->x, msg->y, msg->z};
   const std::array<float, 4> q = msg->q;
+
+  // RCLCPP_INFO(get_logger(), "X: %f, Y:%f, Z: %f", position[0], position[1], position[2]);
 
   quaternion2euler(q);
 
-}
-
-bool CameraScreenshotsHandler::storeWaypointData(const int32_t &lat, const int32_t &lon, const float &yaw)
-{
-  const cv::Mat rgbImage = m_rgbImagePtr->image;
-  const cv::Mat irImage = m_irImagePtr->image;
-  bool retStatus = true;
-
-  if((false == rgbImage.empty()) && (false == irImage.empty()))
-  {
-    const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
-    const std::string irImageFileName = IR_IMG_STR + std::to_string(m_waypointsVisited+1) + PNG_EXTENSION;
-
-    const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
-    const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
-
-    cv::imwrite(rgbImagePath, rgbImage);
-    cv::imwrite(irImagePath, irImage);
-
-    const std::list<std::string> fields = {rgbImageFileName, irImageFileName, std::to_string(lat), 
-                                            std::to_string(lon), std::to_string(yaw)};
-
-    write_CSV_file(fields);
-  }
-  else
-  {
-    RCLCPP_WARN(get_logger(), "COULD NOT GET RGB OR IR IMAGES, TRYING AGAIN...");
-    retStatus = false;
-  }
-
-
-  return retStatus;
-}
-
-
-void CameraScreenshotsHandler::gps_callback(const px4_msgs::msg::VehicleGpsPosition::SharedPtr msg)
-{
-
   if(m_waypointsVisited < m_numWaypoints)
   {
-    RCLCPP_INFO(get_logger(), "WE VISITING WAYPOINT %d --> LAT: %d | LON: %d", m_waypointsVisited, 
-    m_waypoints[m_waypointsVisited].first, m_waypoints[m_waypointsVisited].second);
-
-    RCLCPP_INFO(get_logger(), "LAT ERROR: %d | LON ERROR: %d", 
-    (msg->lat - m_waypoints[m_waypointsVisited].first), (msg->lon - m_waypoints[m_waypointsVisited].second));
 
     // If it is inside the waypoint area
-    if(((msg->lat - m_waypoints[m_waypointsVisited].first) < ERROR) && 
-       ((msg->lon - m_waypoints[m_waypointsVisited].second) < ERROR))
+    if((abs(position[X] - m_waypoints[m_waypointsVisited].first) < ERROR) && 
+       (abs(position[Y] - m_waypoints[m_waypointsVisited].second) < ERROR) &&
+       (abs(position[Z] - m_altitude) < ERROR))
     {
       RCLCPP_INFO(get_logger(), "WAYPOINT DETECTED!!! CHECKING ROLL/PITCH");
       RCLCPP_INFO(get_logger(), "ROLL: %s | PITCH: %s", fabs(m_odom[ROLL]), fabs(m_odom[PITCH]));
@@ -257,7 +257,7 @@ void CameraScreenshotsHandler::gps_callback(const px4_msgs::msg::VehicleGpsPosit
       {
         RCLCPP_INFO(get_logger(), "WAYPOINT READY!, CAPTURING IMAGES...");
 
-        const bool status = storeWaypointData(msg->lat, msg->lon, m_odom[YAW]);
+        const bool status = storeWaypointData(position, m_odom);
 
         if(true == status)
         {
@@ -271,7 +271,44 @@ void CameraScreenshotsHandler::gps_callback(const px4_msgs::msg::VehicleGpsPosit
     RCLCPP_INFO(get_logger(), "MISSION ACOMPLISHED! GOING BACK TO HOME...");
     rclcpp::shutdown();
   }
+
+
 }
+
+bool CameraScreenshotsHandler::storeWaypointData(const std::array<double,3> &position, const std::array<double,3> odom)
+{
+  const cv::Mat rgbImage = m_rgbImagePtr->image;
+  const cv::Mat irImage = m_irImagePtr->image;
+  bool retStatus = true;
+  const int32_t num_waypoint = m_waypointsVisited+1;
+
+  if((false == rgbImage.empty()) && (false == irImage.empty()))
+  {
+    const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(num_waypoint) + PNG_EXTENSION;
+    const std::string irImageFileName = IR_IMG_STR + std::to_string(num_waypoint) + PNG_EXTENSION;
+
+    const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
+    const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
+
+    cv::imwrite(rgbImagePath, rgbImage);
+    cv::imwrite(irImagePath, irImage);
+
+    const std::list<std::string> fields = 
+    {std::to_string(num_waypoint), rgbImageFileName, irImageFileName,
+     std::to_string(position[X]), std::to_string(position[Y]), std::to_string(position[Z]),
+     std::to_string(odom[ROLL]), std::to_string(odom[PITCH]), std::to_string(odom[YAW])};
+
+    write_CSV_file(fields);
+  }
+  else
+  {
+    RCLCPP_WARN(get_logger(), "COULD NOT GET RGB OR IR IMAGES, TRYING AGAIN...");
+    retStatus = false;
+  }
+
+  return retStatus;
+}
+
 
 
 int main (int argc, char *argv[])
