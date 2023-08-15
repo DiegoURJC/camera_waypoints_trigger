@@ -15,6 +15,7 @@
 using std::placeholders::_1;
 
 
+
 class CameraScreenshotsHandler : public rclcpp::Node
 {
 public:
@@ -26,13 +27,16 @@ public:
   m_waypoints({}),
   m_numWaypoints(0),
   m_waypointsVisited(0),
+  m_photosTaken(0),
   m_odom({}),
-  m_altitude(0.0)
+  m_altitude(0.0),
+  m_onWaypoint(false)
   {
     declare_parameter("mission_altitude");
     declare_parameter("home_gps_pos");
     declare_parameter("wp_lat");
     declare_parameter("wp_lon");
+
 
     m_RGBSubscriber = create_subscription<sensor_msgs::msg::Image>
     ("/camera/color/image_raw", 50, std::bind(&CameraScreenshotsHandler::rgb_callback, this, _1));
@@ -65,7 +69,11 @@ private:
 
   void rgb_callback(const sensor_msgs::msg::Image::SharedPtr msg);
 
-  void quaternion2euler(const std::array<float, 4> &q); 
+  void quaternion2euler(const std::array<float, 4> &q) noexcept;
+
+  float checkWaypointHoldTime() const noexcept;
+
+  void updateMissionStatus(const std::array<double, 3> &position, const std::array<float, 4> &q);
 
   void odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg);
 
@@ -80,6 +88,8 @@ private:
 
   int32_t m_waypointsVisited;
 
+  int32_t m_photosTaken;
+
   std::array<double, 3> m_odom;
 
   double m_altitude;
@@ -93,5 +103,11 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_IRSubscriber;
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr m_odometrySubscriber;
 
-  const int32_t ERROR = 100;
+  bool m_onWaypoint;
+
+  rclcpp::Time m_wpTimestamp;
+
+  static constexpr int32_t ERROR = 100;
+  static constexpr int32_t WP_PHOTOS = 5;
+  static constexpr float WP_HOLD_TIME = 20.0f;
 };

@@ -43,7 +43,10 @@ constexpr int32_t X = 0;
 constexpr int32_t Y = 1;
 constexpr int32_t Z = 2;
 
-constexpr float TOLERANCE = 0.035;
+
+constexpr float NANOSEC_IN_SECS = 10e9f;
+constexpr float TOLERANCE = 0.035f;
+
 
 
 void signalHandler(int signal)
@@ -214,7 +217,7 @@ void CameraScreenshotsHandler::rgb_callback(const sensor_msgs::msg::Image::Share
 }
 
 
-void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q) 
+void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q) noexcept
 {
   constexpr int32_t W = 0;
   constexpr int32_t X = 1;
@@ -231,26 +234,64 @@ void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q)
   RCLCPP_INFO(get_logger(), "ROLL: %f(deg) | PITCH: %f(deg) | YAW: %f(deg)", (m_odom[0]*180.0)/ 3.1415, (m_odom[1]*180.0)/ 3.1415, (m_odom[2]*180.0)/ 3.1415);
 }
 
+float CameraScreenshotsHandler::checkWaypointHoldTime() const noexcept
+{
+  const rclcpp::Time nowTimestamp = now();
+
+  const rclcpp::Duration timeDiff = nowTimestamp - m_wpTimestamp;
+
+  const float timeSecs = timeDiff.nanoseconds() / NANOSEC_IN_SECS;
+
+
+  return timeSecs;
+
+}
+
+
+void CameraScreenshotsHandler::updateMissionStatus(const std::array<double, 3> &position, const std::array<float, 4> &q)
+{
+  // Drone is travelling to a waypoint
+  if(false == m_onWaypoint)
+  {
+    // If it is inside the waypoint area
+    if((fabs(position[X] - m_waypoints[m_waypointsVisited].first) < ERROR) && 
+       (fabs(position[Y] - m_waypoints[m_waypointsVisited].second) < ERROR) &&
+       (fabs(position[Z] - m_altitude) < ERROR))
+    {
+      m_onWaypoint = true;
+      m_wpTimestamp = now();
+      m_photosTaken = 0;
+    }
+  }
+  // Drone is on a waypoint
+  else
+  {
+    const float timeDiff = checkWaypointHoldTime();
+    if((timeDiff >= WP_HOLD_TIME) || (m_photosTaken >= WP_PHOTOS))
+    {
+      m_onWaypoint = false;
+      m_waypointsVisited++;
+
+    }
+  }
+}
+
 
 void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg)
 {
   const std::array<double, 3> position = {msg->x, msg->y, msg->z};
   const std::array<float, 4> q = msg->q;
 
-  // RCLCPP_INFO(get_logger(), "X: %f, Y:%f, Z: %f", position[0], position[1], position[2]);
-
   quaternion2euler(q);
 
   if(m_waypointsVisited < m_numWaypoints)
   {
+    updateMissionStatus(position, q);
 
-    // If it is inside the waypoint area
-    if((abs(position[X] - m_waypoints[m_waypointsVisited].first) < ERROR) && 
-       (abs(position[Y] - m_waypoints[m_waypointsVisited].second) < ERROR) &&
-       (abs(position[Z] - m_altitude) < ERROR))
+    if(true == m_onWaypoint)
     {
       RCLCPP_INFO(get_logger(), "WAYPOINT DETECTED!!! CHECKING ROLL/PITCH");
-      RCLCPP_INFO(get_logger(), "ROLL: %s | PITCH: %s", fabs(m_odom[ROLL]), fabs(m_odom[PITCH]));
+      RCLCPP_INFO(get_logger(), "ROLL: %f | PITCH: %f", fabs(m_odom[ROLL]), fabs(m_odom[PITCH]));
 
       //  If it is parallel to the ground
       if((fabs(m_odom[ROLL]) <= TOLERANCE) && (fabs(m_odom[PITCH]) <= TOLERANCE))
@@ -261,9 +302,15 @@ void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometr
 
         if(true == status)
         {
-          m_waypointsVisited++;
+          m_photosTaken++;
         }
       }
+    }
+    else
+    {
+      RCLCPP_INFO(get_logger(), "NAVIGATING TO WAYPOINT %d: (%f, %f) | CURRENT POSITION: (%f, %f, %f)", 
+        m_waypointsVisited+1, m_waypoints[m_waypointsVisited].first, m_waypoints[m_waypointsVisited].second, 
+        position[X], position[Y], position[Z]);
     }
   }
   else
@@ -281,11 +328,14 @@ bool CameraScreenshotsHandler::storeWaypointData(const std::array<double,3> &pos
   const cv::Mat irImage = m_irImagePtr->image;
   bool retStatus = true;
   const int32_t num_waypoint = m_waypointsVisited+1;
+  const int32_t num_photo = m_photosTaken+1;
 
   if((false == rgbImage.empty()) && (false == irImage.empty()))
   {
-    const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(num_waypoint) + PNG_EXTENSION;
-    const std::string irImageFileName = IR_IMG_STR + std::to_string(num_waypoint) + PNG_EXTENSION;
+    const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(num_waypoint) + "_" + 
+                                          std::to_string(num_photo) + PNG_EXTENSION;
+    const std::string irImageFileName = IR_IMG_STR + std::to_string(num_waypoint) + "_" + 
+                                          std::to_string(num_photo) + PNG_EXTENSION;
 
     const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
     const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
