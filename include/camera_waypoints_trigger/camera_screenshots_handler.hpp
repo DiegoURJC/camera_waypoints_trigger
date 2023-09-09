@@ -49,6 +49,9 @@ public:
 
     init();
 
+    m_onWaypoint = true;
+    m_wpTimestamp = std::chrono::system_clock::now();
+
   }
 
   ~CameraScreenshotsHandler() = default;
@@ -71,7 +74,7 @@ private:
 
   void quaternion2euler(const std::array<float, 4> &q) noexcept;
 
-  float checkWaypointHoldTime() const noexcept;
+  double checkWaypointHoldTime() const noexcept;
 
   void updateMissionStatus(const std::array<double, 3> &position, const std::array<float, 4> &q);
 
@@ -105,9 +108,9 @@ private:
 
   bool m_onWaypoint;
 
-  rclcpp::Time m_wpTimestamp;
+  std::chrono::time_point<std::chrono::system_clock> m_wpTimestamp;
 
-  static constexpr int32_t ERROR = 100;
+  static constexpr int32_t ERROR = 1;
   static constexpr int32_t WP_PHOTOS = 5;
   static constexpr float WP_HOLD_TIME = 20.0f;
 };

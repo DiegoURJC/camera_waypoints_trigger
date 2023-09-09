@@ -209,6 +209,7 @@ void CameraScreenshotsHandler::rgb_callback(const sensor_msgs::msg::Image::Share
   try
   {
     m_rgbImagePtr = cv_bridge::toCvCopy(msg, msg->encoding);
+    RCLCPP_INFO(get_logger(), "IMAGE ENCODING: %s", msg->encoding.c_str());
   }
   catch (cv_bridge::Exception &e)
   {
@@ -231,19 +232,17 @@ void CameraScreenshotsHandler::quaternion2euler(const std::array<float, 4> &q) n
   m_odom[YAW] = std::atan2(2 * (q[W] * q[Z] + q[X] * q[Y]), 
                          1 - 2 * (q[Y] * q[Y] + q[Z] * q[Z]));
 
-  RCLCPP_INFO(get_logger(), "ROLL: %f(deg) | PITCH: %f(deg) | YAW: %f(deg)", (m_odom[0]*180.0)/ 3.1415, (m_odom[1]*180.0)/ 3.1415, (m_odom[2]*180.0)/ 3.1415);
+  RCLCPP_INFO(get_logger(), "ROLL: %f(deg) | PITCH: %f(deg) | YAW: %f(deg)", (m_odom[ROLL]*180.0)/ 3.1415, (m_odom[PITCH]*180.0)/ 3.1415, (m_odom[YAW]*180.0)/ 3.1415);
 }
 
-float CameraScreenshotsHandler::checkWaypointHoldTime() const noexcept
+double CameraScreenshotsHandler::checkWaypointHoldTime() const noexcept
 {
-  const rclcpp::Time nowTimestamp = now();
+  const auto nowTimestamp = std::chrono::system_clock::now();
 
-  const rclcpp::Duration timeDiff = nowTimestamp - m_wpTimestamp;
-
-  const float timeSecs = timeDiff.nanoseconds() / NANOSEC_IN_SECS;
+  const std::chrono::duration<double> timeElapsed = nowTimestamp - m_wpTimestamp;
 
 
-  return timeSecs;
+  return timeElapsed.count();
 
 }
 
@@ -253,20 +252,26 @@ void CameraScreenshotsHandler::updateMissionStatus(const std::array<double, 3> &
   // Drone is travelling to a waypoint
   if(false == m_onWaypoint)
   {
+    RCLCPP_INFO(get_logger(), "DISTANCE TO WP: (%f, %f)", 
+      fabs(position[X] - m_waypoints[m_waypointsVisited].first),
+      fabs(position[Y] - m_waypoints[m_waypointsVisited].second));
     // If it is inside the waypoint area
     if((fabs(position[X] - m_waypoints[m_waypointsVisited].first) < ERROR) && 
        (fabs(position[Y] - m_waypoints[m_waypointsVisited].second) < ERROR) &&
        (fabs(position[Z] - m_altitude) < ERROR))
     {
       m_onWaypoint = true;
-      m_wpTimestamp = now();
+      m_wpTimestamp = std::chrono::system_clock::now();
       m_photosTaken = 0;
     }
   }
   // Drone is on a waypoint
   else
   {
-    const float timeDiff = checkWaypointHoldTime();
+    const double timeDiff = checkWaypointHoldTime();
+
+    RCLCPP_INFO(get_logger(), "TIME IN CHECKPOINT: %f, PHOTOS TAKEN: %d", timeDiff, m_photosTaken);
+
     if((timeDiff >= WP_HOLD_TIME) || (m_photosTaken >= WP_PHOTOS))
     {
       m_onWaypoint = false;
@@ -290,7 +295,7 @@ void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometr
 
     if(true == m_onWaypoint)
     {
-      RCLCPP_INFO(get_logger(), "WAYPOINT DETECTED!!! CHECKING ROLL/PITCH");
+      RCLCPP_INFO(get_logger(), "WAYPOINT DETECTED!!! CHECKING ROLL/PITCH...");
       RCLCPP_INFO(get_logger(), "ROLL: %f | PITCH: %f", fabs(m_odom[ROLL]), fabs(m_odom[PITCH]));
 
       //  If it is parallel to the ground
@@ -318,43 +323,56 @@ void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometr
     RCLCPP_INFO(get_logger(), "MISSION ACOMPLISHED! GOING BACK TO HOME...");
     rclcpp::shutdown();
   }
-
-
 }
 
 bool CameraScreenshotsHandler::storeWaypointData(const std::array<double,3> &position, const std::array<double,3> odom)
 {
-  const cv::Mat rgbImage = m_rgbImagePtr->image;
-  const cv::Mat irImage = m_irImagePtr->image;
-  bool retStatus = true;
-  const int32_t num_waypoint = m_waypointsVisited+1;
-  const int32_t num_photo = m_photosTaken+1;
+  bool retStatus;
 
-  if((false == rgbImage.empty()) && (false == irImage.empty()))
+  if((nullptr != m_rgbImagePtr) && (nullptr != m_irImagePtr))
   {
-    const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(num_waypoint) + "_" + 
-                                          std::to_string(num_photo) + PNG_EXTENSION;
-    const std::string irImageFileName = IR_IMG_STR + std::to_string(num_waypoint) + "_" + 
-                                          std::to_string(num_photo) + PNG_EXTENSION;
+    const cv::Mat rgbImage = m_rgbImagePtr->image;
+    const cv::Mat irImage = m_irImagePtr->image;
+    retStatus = true;
+    const int32_t num_waypoint = m_waypointsVisited+1;
+    const int32_t num_photo = m_photosTaken+1;
 
-    const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
-    const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
+    if((false == rgbImage.empty()) && (false == irImage.empty()))
+    {
+      const std::string rgbImageFileName = RGB_IMG_STR + std::to_string(num_waypoint) + "_" + 
+                                            std::to_string(num_photo) + PNG_EXTENSION;
+      const std::string irImageFileName = IR_IMG_STR + std::to_string(num_waypoint) + "_" + 
+                                            std::to_string(num_photo) + PNG_EXTENSION;
 
-    cv::imwrite(rgbImagePath, rgbImage);
-    cv::imwrite(irImagePath, irImage);
+      const std::string rgbImagePath = m_missionDir.string() + SLASH_STR + rgbImageFileName;
+      const std::string irImagePath = m_missionDir.string() + SLASH_STR + irImageFileName;
 
-    const std::list<std::string> fields = 
-    {std::to_string(num_waypoint), rgbImageFileName, irImageFileName,
-     std::to_string(position[X]), std::to_string(position[Y]), std::to_string(position[Z]),
-     std::to_string(odom[ROLL]), std::to_string(odom[PITCH]), std::to_string(odom[YAW])};
+      cv::cvtColor(rgbImage, rgbImage, cv::COLOR_BGR2RGB);
 
-    write_CSV_file(fields);
+      cv::imwrite(rgbImagePath, rgbImage);
+      cv::imwrite(irImagePath, irImage);
+
+      const std::list<std::string> fields = 
+      {std::to_string(num_waypoint), rgbImageFileName, irImageFileName,
+      std::to_string(position[X]), std::to_string(position[Y]), std::to_string(position[Z]),
+      std::to_string(odom[ROLL]), std::to_string(odom[PITCH]), std::to_string(odom[YAW])};
+
+      write_CSV_file(fields);
+      
+      m_rgbImagePtr = nullptr;
+      m_irImagePtr = nullptr;
+    }
+    else
+    {
+      RCLCPP_WARN(get_logger(), "COULD NOT GET RGB OR IR IMAGES, TRYING AGAIN...");
+      retStatus = false;
+    }
   }
   else
   {
-    RCLCPP_WARN(get_logger(), "COULD NOT GET RGB OR IR IMAGES, TRYING AGAIN...");
     retStatus = false;
   }
+
 
   return retStatus;
 }
