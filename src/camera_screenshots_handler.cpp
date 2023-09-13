@@ -177,7 +177,6 @@ void CameraScreenshotsHandler::initWaypoints()
 
     printf("HOME GPS: (%f,%f) WAYPOINT GPS: (%f,%f) METERS(%f,%f)\n", 
     homePos[X], homePos[Y], waypoint[X], waypoint[Y], cartesianWp[X], cartesianWp[Y]);
-
   }
 
   m_numWaypoints = m_waypoints.size();
@@ -209,7 +208,6 @@ void CameraScreenshotsHandler::rgb_callback(const sensor_msgs::msg::Image::Share
   try
   {
     m_rgbImagePtr = cv_bridge::toCvCopy(msg, msg->encoding);
-    RCLCPP_INFO(get_logger(), "IMAGE ENCODING: %s", msg->encoding.c_str());
   }
   catch (cv_bridge::Exception &e)
   {
@@ -247,7 +245,7 @@ double CameraScreenshotsHandler::checkWaypointHoldTime() const noexcept
 }
 
 
-void CameraScreenshotsHandler::updateMissionStatus(const std::array<double, 3> &position, const std::array<float, 4> &q)
+void CameraScreenshotsHandler::updateMissionStatus(const std::array<double, 3> &position)
 {
   // Drone is travelling to a waypoint
   if(false == m_onWaypoint)
@@ -257,8 +255,8 @@ void CameraScreenshotsHandler::updateMissionStatus(const std::array<double, 3> &
       fabs(position[Y] - m_waypoints[m_waypointsVisited].second));
     // If it is inside the waypoint area
     if((fabs(position[X] - m_waypoints[m_waypointsVisited].first) < ERROR) && 
-       (fabs(position[Y] - m_waypoints[m_waypointsVisited].second) < ERROR) &&
-       (fabs(position[Z] - m_altitude) < ERROR))
+       (fabs(position[Y] - m_waypoints[m_waypointsVisited].second) < ERROR)) //&&
+      //  (fabs(position[Z] - m_altitude) < ERROR))
     {
       m_onWaypoint = true;
       m_wpTimestamp = std::chrono::system_clock::now();
@@ -291,7 +289,7 @@ void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometr
 
   if(m_waypointsVisited < m_numWaypoints)
   {
-    updateMissionStatus(position, q);
+    updateMissionStatus(position);
 
     if(true == m_onWaypoint)
     {
@@ -315,7 +313,7 @@ void CameraScreenshotsHandler::odom_callback(const px4_msgs::msg::VehicleOdometr
     {
       RCLCPP_INFO(get_logger(), "NAVIGATING TO WAYPOINT %d: (%f, %f) | CURRENT POSITION: (%f, %f, %f)", 
         m_waypointsVisited+1, m_waypoints[m_waypointsVisited].first, m_waypoints[m_waypointsVisited].second, 
-        position[X], position[Y], position[Z]);
+        position[X], position[Y], -position[Z]);
     }
   }
   else
@@ -354,7 +352,7 @@ bool CameraScreenshotsHandler::storeWaypointData(const std::array<double,3> &pos
 
       const std::list<std::string> fields = 
       {std::to_string(num_waypoint), rgbImageFileName, irImageFileName,
-      std::to_string(position[X]), std::to_string(position[Y]), std::to_string(position[Z]),
+      std::to_string(position[X]), std::to_string(position[Y]), std::to_string(-position[Z]),
       std::to_string(odom[ROLL]), std::to_string(odom[PITCH]), std::to_string(odom[YAW])};
 
       write_CSV_file(fields);

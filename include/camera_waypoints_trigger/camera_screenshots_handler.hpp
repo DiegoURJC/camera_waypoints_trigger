@@ -49,9 +49,6 @@ public:
 
     init();
 
-    m_onWaypoint = true;
-    m_wpTimestamp = std::chrono::system_clock::now();
-
   }
 
   ~CameraScreenshotsHandler() = default;
@@ -76,7 +73,7 @@ private:
 
   double checkWaypointHoldTime() const noexcept;
 
-  void updateMissionStatus(const std::array<double, 3> &position, const std::array<float, 4> &q);
+  void updateMissionStatus(const std::array<double, 3> &position);
 
   void odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg);
 
@@ -110,7 +107,7 @@ private:
 
   std::chrono::time_point<std::chrono::system_clock> m_wpTimestamp;
 
-  static constexpr int32_t ERROR = 1;
+  static constexpr double ERROR = 0.5;
   static constexpr int32_t WP_PHOTOS = 5;
   static constexpr float WP_HOLD_TIME = 20.0f;
 };
