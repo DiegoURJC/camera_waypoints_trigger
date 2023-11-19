@@ -37,9 +37,13 @@ set(dependencies
 add_executable(camera_screenshots_handler src/camera_screenshots_handler.cpp)
 ament_target_dependencies(camera_screenshots_handler ${dependencies})
 
+add_executable(periodic_image_capturer src/periodic_image_capturer.cpp)
+ament_target_dependencies(periodic_image_capturer ${dependencies})
+
 
 install(TARGETS
   camera_screenshots_handler
+  periodic_image_capturer
 
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
