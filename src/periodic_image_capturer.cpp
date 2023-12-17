@@ -16,9 +16,15 @@ const std::string MISSION_DIR_TOKEN = "mission_";
 const std::string SLASH_STR = "/";
 const std::string COMMA_STR = ",";
 const std::string CSV_FILENAME = "metadata.csv";
+const std::string CSV_RGB_IMG_COL_STR = "rgb_img_name";
+const std::string CSV_IR_IMG_COL_STR = "ir_img_name";
 const std::string CSV_X_COL_STR = "x";
 const std::string CSV_Y_COL_STR = "y";
 const std::string CSV_Z_COL_STR = "z";
+const std::string CSV_Q_X_COL_STR = "q_x";
+const std::string CSV_Q_Y_COL_STR = "q_y";
+const std::string CSV_Q_Z_COL_STR = "q_z";
+const std::string CSV_Q_W_COL_STR = "q_w";
 const std::string CSV_ROLL_COL_STR = "roll(rad)";
 const std::string CSV_PITCH_COL_STR = "pitch(rad)";
 const std::string CSV_YAW_COL_STR = "yaw(rad)";
@@ -26,14 +32,20 @@ const std::string RGB_IMG_STR = "rgb_img_";
 const std::string IR_IMG_STR = "ir_img_";
 const std::string PNG_EXTENSION = ".png";
 const std::list<std::string> CSV_COL_NAMES = 
-  {CSV_X_COL_STR, CSV_Y_COL_STR, CSV_Z_COL_STR,
-   CSV_ROLL_COL_STR, CSV_PITCH_COL_STR, CSV_YAW_COL_STR};
+  {CSV_RGB_IMG_COL_STR, CSV_IR_IMG_COL_STR,
+   CSV_X_COL_STR, CSV_Y_COL_STR, CSV_Z_COL_STR,
+   CSV_Q_X_COL_STR, CSV_Q_Y_COL_STR, CSV_Q_Z_COL_STR, CSV_Q_W_COL_STR};
 constexpr int32_t ROLL = 0;
 constexpr int32_t PITCH = 1;
 constexpr int32_t YAW = 2; 
 constexpr int32_t X = 0;
 constexpr int32_t Y = 1;
 constexpr int32_t Z = 2;
+constexpr int32_t Q_W = 0;
+constexpr int32_t Q_X = 1;
+constexpr int32_t Q_Y = 2;
+constexpr int32_t Q_Z = 3;
+
 
 
 void signalHandler(int signal)
@@ -148,11 +160,11 @@ void PeriodicImageCapturer::ir_callback(const sensor_msgs::msg::Image::SharedPtr
     RCLCPP_ERROR(get_logger(), "cv_bridge exception %s", e.what());
   }
 
-  if(checkTimeElapsed() > IMAGE_CAPTURER_TIMER)
-  {
-    storeImages();
-    m_photoTimestamp = std::chrono::system_clock::now();
-  }
+  // if(checkTimeElapsed() > IMAGE_CAPTURER_TIMER)
+  // {
+  //   storeImages();
+  //   m_photoTimestamp = std::chrono::system_clock::now();
+  // }
 }
 
 
@@ -167,32 +179,24 @@ void PeriodicImageCapturer::rgb_callback(const sensor_msgs::msg::Image::SharedPt
     RCLCPP_ERROR(get_logger(), "cv_bridge exception %s", e.what());
   }
 
-  if(checkTimeElapsed() > IMAGE_CAPTURER_TIMER)
-  {
-    storeImages();
-    m_photoTimestamp = std::chrono::system_clock::now();
-  }
+  // if(checkTimeElapsed() > IMAGE_CAPTURER_TIMER)
+  // {
+  //   storeImages();
+  //   m_photoTimestamp = std::chrono::system_clock::now();
+  // }
 }
 
 
 std::array<double, 3> PeriodicImageCapturer::quaternion2euler(const std::array<float, 4> &q) noexcept
 {
-  constexpr int32_t W = 0;
-  constexpr int32_t X = 1;
-  constexpr int32_t Y = 2;
-  constexpr int32_t Z = 3;
-
   std::array<double, 3> odom;
 
   // Conversion to roll, pitch, yaw
-  odom[ROLL] = std::atan2(2 * (q[W] * q[X] + q[Y] * q[Z]), 
-                         1 - 2 * (q[X] * q[X] + q[Y] * q[Y]));
-  odom[PITCH] = std::asin(2 * (q[W] * q[Y] - q[Z] * q[X]));
-  odom[YAW] = std::atan2(2 * (q[W] * q[Z] + q[X] * q[Y]), 
-                         1 - 2 * (q[Y] * q[Y] + q[Z] * q[Z]));
-
-  RCLCPP_INFO(get_logger(), "ROLL: %f(deg) | PITCH: %f(deg) | YAW: %f(deg)", 
-    (odom[ROLL]*180.0)/ 3.1415, (odom[PITCH]*180.0)/ 3.1415, (odom[YAW]*180.0)/ 3.1415);
+  odom[ROLL] = std::atan2(2 * (q[Q_W] * q[Q_X] + q[Q_Y] * q[Q_Z]), 
+                         1 - 2 * (q[Q_X] * q[Q_X] + q[Q_Y] * q[Q_Y]));
+  odom[PITCH] = std::asin(2 * (q[Q_W] * q[Q_Y] - q[Q_Z] * q[Q_X]));
+  odom[YAW] = std::atan2(2 * (q[Q_W] * q[Q_Z] + q[Q_X] * q[Q_Y]), 
+                         1 - 2 * (q[Q_Y] * q[Q_Y] + q[Q_Z] * q[Q_Z]));
 
   return odom;
 }
@@ -212,16 +216,10 @@ double PeriodicImageCapturer::checkTimeElapsed() const noexcept
 
 void PeriodicImageCapturer::odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg)
 {
-  const std::array<double, 3> pos = {msg->x, msg->y, msg->z};
-  const std::array<float, 4> q = msg->q;
-
-  const std::array<double, 3> odom = quaternion2euler(q);
-
-  const std::list<std::string> fields = 
-  {std::to_string(pos[X]), std::to_string(pos[Y]), std::to_string(pos[Z]),
-  std::to_string(odom[ROLL]), std::to_string(odom[PITCH]), std::to_string(odom[YAW])};
-
-  write_CSV_file(fields);
+  m_pos = {msg->x, msg->y, msg->z};
+  
+  m_q = msg->q;
+  m_odom = quaternion2euler(m_q);
 
 }
 
@@ -234,6 +232,8 @@ bool PeriodicImageCapturer::storeImages()
     const cv::Mat rgbImage = m_rgbImagePtr->image;
     const cv::Mat irImage = m_irImagePtr->image;
     retStatus = true;
+
+    RCLCPP_INFO(get_logger(), "STORING IMAGES...");
 
     if((false == rgbImage.empty()) && (false == irImage.empty()))
     {
@@ -248,9 +248,18 @@ bool PeriodicImageCapturer::storeImages()
       cv::imwrite(rgbImagePath, rgbImage);
       cv::imwrite(irImagePath, irImage);
 
-      m_photosTaken++;      
+      m_photosTaken++;     
 
-      
+      const std::list<std::string> fields = 
+          {rgbImageFileName, irImageFileName,
+           std::to_string(m_pos[X]), std::to_string(m_pos[Y]), std::to_string(m_pos[Z]),
+           std::to_string(m_q[Q_X]), std::to_string(m_q[Q_Y]), std::to_string(m_q[Q_Z]), std::to_string(m_q[Q_W])};
+
+      RCLCPP_INFO(get_logger(), "ROLL: %f(deg) | PITCH: %f(deg) | YAW: %f(deg)", 
+        (m_odom[ROLL]*180.0)/ 3.1415, (m_odom[PITCH]*180.0)/ 3.1415, (m_odom[YAW]*180.0)/ 3.1415);
+
+      write_CSV_file(fields);
+
       m_rgbImagePtr = nullptr;
       m_irImagePtr = nullptr;
     }
@@ -270,14 +279,19 @@ bool PeriodicImageCapturer::storeImages()
 }
 
 
-
 int main (int argc, char *argv[])
 {
   std::signal(SIGINT, signalHandler);
 
   rclcpp::init(argc, argv);
 
-  rclcpp::spin(std::make_shared<PeriodicImageCapturer>());
+  auto node = std::make_shared<PeriodicImageCapturer>();
+
+  std::chrono::seconds timer_period(5);
+
+  auto timer = node->create_wall_timer(timer_period, std::bind(&PeriodicImageCapturer::storeImages, node));
+
+  rclcpp::spin(node);
 
   rclcpp::shutdown();
 

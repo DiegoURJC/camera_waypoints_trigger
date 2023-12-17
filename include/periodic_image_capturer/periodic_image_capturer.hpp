@@ -40,6 +40,8 @@ public:
 
   ~PeriodicImageCapturer() = default;
 
+  bool storeImages();
+
 private:
 
   void write_CSV_file(const std::list<std::string> &fields);
@@ -62,8 +64,6 @@ private:
 
   void odom_callback(const px4_msgs::msg::VehicleOdometry::SharedPtr msg);
 
-  bool storeImages();
-
   cv_bridge::CvImagePtr m_rgbImagePtr;
   cv_bridge::CvImagePtr m_irImagePtr;
 
@@ -76,11 +76,12 @@ private:
   std::filesystem::path m_missionDir;
   std::string m_csvFilePath;
 
+  std::array<double, 3> m_pos;
+  std::array<float, 4> m_q;
+
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_RGBSubscriber;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_IRSubscriber;
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr m_odometrySubscriber;
 
   std::chrono::time_point<std::chrono::system_clock> m_photoTimestamp;
-
-  static constexpr double IMAGE_CAPTURER_TIMER = 5.0;
 };
